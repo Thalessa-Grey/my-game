@@ -224,3 +224,15 @@
             // 8. 渲染爆炸粒子
             for(let p = particles.length - 1; p >= 0; p--) {
                 let pt = particles[p];
+                pt.x += pt.vx; pt.y += pt.vy; pt.alpha -= 0.03;
+                if(pt.alpha <= 0) { particles.splice(p, 1); continue; }
+                ctx.beginPath(); ctx.arc(pt.x, pt.y, pt.r, 0, Math.PI*2);
+                ctx.fillStyle = pt.color; ctx.globalAlpha = pt.alpha; ctx.fill(); ctx.globalAlpha = 1;
+            }
+
+            requestAnimationFrame(update);
+        }
+        update();
+    </script>
+</body>
+</html>
