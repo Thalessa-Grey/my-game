@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>核心机制灰盒验证：吸附与喷射</title>
+    <style>
+        body { background: #111; margin: 0; overflow: hidden; font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        #container { position: relative; width: 100vw; height: 100vh; max-width: 500px; background: #1a1a1a; }
+        canvas { display: block; width: 100%; height: 100%; }
+        #info { position: absolute; top: 10px; left: 10px; color: #fff; font-size: 12px; pointer-events: none; line-height: 1.6; }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="info">
+            🟢 移动：拖拽绿色圆圈<br>
+            🔴 吸附：<b>按住不放</b> 进入吸附状态（有蓝色光圈）<br>
+            🚀 喷射：<b>松开鼠标/手指</b>，将吸住的方块朝前上方全部喷射出去！<br>
+            📊 当前得分: <span id="score">0</span> | 已吸附: <span id="hold">0</span>
+        </div>
+        <canvas id="gameCanvas"></canvas>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const container = document.getElementById('container');
+        const scoreText = document.getElementById('score');
+        const holdText = document.getElementById('hold');
+
+        let score = 0;
+        const player = { x: 250, y: 600, r: 20, isPressing: false, lastVx: 0, lastVy: -5 };
+        let obstacles = []; // 掉落的红色方块
+        let suckedObstacles = []; // 被吸附跟着玩家的方块
+        let bulletObstacles = []; // 被喷射出去的方块
+        
+        function resize() {
+            const rect = container.getBoundingClientRect();
+            canvas.width = rect.width; canvas.height = rect.height;
+        }
+        window.addEventListener('resize', resize); resize();
+
+        // 触摸与鼠标事件统一监听
+        function getPos(e) {
+            const rect = canvas.getBoundingClientRect();
+            const cx = e.touches ? e.touches[0].clientX : e.clientX;
+            const cy = e.touches ? e.touches[0].clientY : e.clientY;
+            return { x: cx - rect.left, y: cy - rect.top };
+        }
+
+        const startAction = (e) => { player.isPressing = true; };
+        const moveAction = (e) => {
+            const pos = getPos(e);
+            let nextX = Math.max(player.r, Math.min(canvas.width - player.r, pos.x));
+            let nextY = Math.max(player.r, Math.min(canvas.height - player.r, pos.y));
+            player.lastVx = nextX - player.x;
+            player.lastVy = nextY - player.y;
+            player.x = nextX; player.y = nextY;
+        };
+        const endAction = () => {
+            player.isPressing = false;
+            // 松开时，把所有吸附的方块转化为喷射子弹
+            if (suckedObstacles.length > 0) {
+                suckedObstacles.forEach((obs, index) => {
+                    obs.isBullet = true;
+                    // 给一个向上的扇形喷射散射速度
+                    let angle = -Math.PI/2 + (Math.random() - 0.5) * 0.6; 
+                    obs.vx = Math.cos(angle) * 12;
+                    obs.vy = Math.sin(angle) * 12;
+                    bulletObstacles.push(obs);
+                });
+                suckedObstacles = [];
+            }
+        };
+
+        canvas.addEventListener('mousedown', startAction);
+        window.addEventListener('mousemove', moveAction);
+        window.addEventListener('mouseup', endAction);
+        canvas.addEventListener('touchstart', (e) => { startAction(e); moveAction(e); });
+        window.addEventListener('touchmove', (e) => { if(player.isPressing) e.preventDefault(); moveAction(e); }, {passive:false});
+        window.addEventListener('touchend', endAction);
+
+        function update() {
+            ctx.fillStyle = '#1a1a1a'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 1. 渲染吸附范围圈
+            if (player.isPressing) {
+                ctx.beginPath(); ctx.arc(player.x, player.y, 80, 0, Math.PI*2);
+                ctx.fillStyle = 'rgba(0, 150, 255, 0.1)'; ctx.fill();
+                ctx.strokeStyle = 'rgba(0, 150, 255, 0.4)'; ctx.stroke();
+            }
+
+            // 2. 绘制玩家
+            ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, Math.PI*2);
+            ctx.fillStyle = '#2ed573'; ctx.fill();
+
+            // 3. 随机生成下落红方块
+            if (Math.random() < 0.04) {
+                obstacles.push({ x: Math.random() * (canvas.width - 40), y: -30, w: 40, h: 25, speed: Math.random() * 2 + 2 });
+            }
+
+            // 4. 处理正常下落的红方块
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                let obs = obstacles[i];
+                obs.y += obs.speed;
+                
+                ctx.fillStyle = '#ff4757'; ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
+
+                // 检查是否进入吸附圈
+                if (player.isPressing) {
+                    let cx = obs.x + obs.w/2; let cy = obs.y + obs.h/2;
+                    if (Math.hypot(player.x - cx, player.y - cy) < 80) {
+                        // 被吸住，转移阵营
+                        obstacles.splice(i, 1);
+                        // 记录相对玩家的偏置位置，形成尾随效果
+                        obs.offsetX = (Math.random() - 0.5) * 30;
+                        obs.offsetY = player.r + Math.random() * 30;
+                        suckedObstacles.push(obs);
+                        continue;
+                    }
+                }
+
+                // 触底回收
+                if (obs.y > canvas.height) { obstacles.splice(i, 1); }
+            }
+
+            // 5. 处理吸附在身边的方块（绘制在玩家屁股后面）
+            suckedObstacles.forEach(obs => {
+                obs.x = player.x - obs.w/2 + obs.offsetX;
+                obs.y = player.y + obs.offsetY;
+                ctx.fillStyle = '#0096ff'; ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
+            });
+
+            // 6. 处理发射出去的方块（子弹）
+            for (let b = bulletObstacles.length - 1; b >= 0; b--) {
+                let bObs = bulletObstacles[b];
+                bObs.x += bObs.vx; bObs.y += bObs.vy;
+
+                ctx.fillStyle = '#ffd32a'; ctx.fillRect(bObs.x, bObs.y, bObs.w, bObs.h);
+
+                // 检查是否撞击了其他下落的红方块（碰撞对撞）
+                for (let i = obstacles.length - 1; i >= 0; i--) {
+                    let target = obstacles[i];
+                    if (bObs.x < target.x + target.w && bObs.x + bObs.w > target.x && bObs.y < target.y + target.h && bObs.y + bObs.h > target.y) {
+                        // 发生对撞消失！
+                        obstacles.splice(i, 1);
+                        bulletObstacles.splice(b, 1);
+                        score += 10; scoreText.textContent = score;
+                        break;
+                    }
+                }
+
+                // 出界回收
+                if (bObs.y < -50 || bObs.x < -50 || bObs.x > canvas.width + 50) {
+                    bulletObstacles.splice(b, 1);
+                }
+            }
+
+            holdText.textContent = suckedObstacles.length;
+            requestAnimationFrame(update);
+        }
+        update();
+    </script>
+</body>
+</html>
