@@ -3,21 +3,26 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>核心机制灰盒验证：吸附与喷射</title>
+    <title>打工人逆袭：离职底气 V2.0 - 吸附喷射版</title>
     <style>
-        body { background: #111; margin: 0; overflow: hidden; font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; }
-        #container { position: relative; width: 100vw; height: 100vh; max-width: 500px; background: #1a1a1a; }
+        body { background: #0b0b16; margin: 0; overflow: hidden; font-family: 'PingFang SC', sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; user-select: none; }
+        #container { position: relative; width: 100vw; height: 100vh; max-width: 600px; background: #0d0d1f; box-shadow: 0 0 30px rgba(0,0,0,0.8); }
         canvas { display: block; width: 100%; height: 100%; }
-        #info { position: absolute; top: 10px; left: 10px; color: #fff; font-size: 12px; pointer-events: none; line-height: 1.6; }
+        #ui-layer { position: absolute; top: 20px; left: 0; width: 100%; text-align: center; color: #fff; pointer-events: none; }
+        .title { font-size: 14px; color: #8a8aaf; letter-spacing: 2px; margin-bottom: 5px; }
+        .score { font-size: 42px; font-weight: bold; color: #ffd32a; text-shadow: 0 0 15px rgba(255,211,42,0.5); }
+        #guide { position: absolute; bottom: 30px; left: 0; width: 100%; text-align: center; color: #5f5f84; font-size: 12px; pointer-events: none; line-height: 1.6; }
     </style>
 </head>
 <body>
     <div id="container">
-        <div id="info">
-            🟢 移动：拖拽绿色圆圈<br>
-            🔴 吸附：<b>按住不放</b> 进入吸附状态（有蓝色光圈）<br>
-            🚀 喷射：<b>松开鼠标/手指</b>，将吸住的方块朝前上方全部喷射出去！<br>
-            📊 当前得分: <span id="score">0</span> | 已吸附: <span id="hold">0</span>
+        <div id="ui-layer">
+            <div class="title">今日离职底气</div>
+            <div class="score" id="scoreText">0</div>
+        </div>
+        <div id="guide">
+            🔴 按住屏幕：张开“怨气圈”吸附无意义需求（体积会变大）<br>
+            🚀 松开手指：化作“驳回！”弹幕爆射创始人画的大饼
         </div>
         <canvas id="gameCanvas"></canvas>
     </div>
@@ -26,51 +31,56 @@
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         const container = document.getElementById('container');
-        const scoreText = document.getElementById('score');
-        const holdText = document.getElementById('hold');
+        const scoreText = document.getElementById('scoreText');
 
         let score = 0;
-        const player = { x: 250, y: 600, r: 20, isPressing: false, lastVx: 0, lastVy: -5 };
-        let obstacles = []; // 掉落的红色方块
-        let suckedObstacles = []; // 被吸附跟着玩家的方块
-        let bulletObstacles = []; // 被喷射出去的方块
+        // 玩家初始状态
+        const player = { x: 300, y: 600, baseR: 22, r: 22, isPressing: false, maxSuckR: 100 };
         
+        let obstacles = [];      // 下落的普通需求和大饼BOSS
+        let suckedItems = [];    // 被玩家吸附拖在屁股后面的原材料
+        let bullets = [];        // 发射出去的反击子弹
+        let particles = [];      // 爆炸粒子特效
+
+        const textPool = ["无效KPI考核", "抓手与闭环", "无意义开会", "群里@所有人", "对齐颗粒度", "底层逻辑"];
+        const bossText = "创始人亲手画的大饼 (BOSS)";
+
         function resize() {
             const rect = container.getBoundingClientRect();
             canvas.width = rect.width; canvas.height = rect.height;
         }
         window.addEventListener('resize', resize); resize();
 
-        // 触摸与鼠标事件统一监听
+        // 触摸/鼠标交互
         function getPos(e) {
             const rect = canvas.getBoundingClientRect();
             const cx = e.touches ? e.touches[0].clientX : e.clientX;
             const cy = e.touches ? e.touches[0].clientY : e.clientY;
             return { x: cx - rect.left, y: cy - rect.top };
         }
-
         const startAction = (e) => { player.isPressing = true; };
         const moveAction = (e) => {
             const pos = getPos(e);
-            let nextX = Math.max(player.r, Math.min(canvas.width - player.r, pos.x));
-            let nextY = Math.max(player.r, Math.min(canvas.height - player.r, pos.y));
-            player.lastVx = nextX - player.x;
-            player.lastVy = nextY - player.y;
-            player.x = nextX; player.y = nextY;
+            player.x = Math.max(player.r, Math.min(canvas.width - player.r, pos.x));
+            player.y = Math.max(player.r, Math.min(canvas.height - player.r, pos.y));
         };
         const endAction = () => {
             player.isPressing = false;
-            // 松开时，把所有吸附的方块转化为喷射子弹
-            if (suckedObstacles.length > 0) {
-                suckedObstacles.forEach((obs, index) => {
-                    obs.isBullet = true;
-                    // 给一个向上的扇形喷射散射速度
-                    let angle = -Math.PI/2 + (Math.random() - 0.5) * 0.6; 
-                    obs.vx = Math.cos(angle) * 12;
-                    obs.vy = Math.sin(angle) * 12;
-                    bulletObstacles.push(obs);
+            // 松开时触发【爆射反击】
+            if (suckedItems.length > 0) {
+                suckedItems.forEach((item, i) => {
+                    // 向上方散射
+                    let angle = -Math.PI/2 + (Math.random() - 0.5) * 0.6;
+                    bullets.push({
+                        x: player.x,
+                        y: player.y - player.r,
+                        text: "驳回！",
+                        vx: Math.cos(angle) * 15,
+                        vy: Math.sin(angle) * 15,
+                        w: 55, h: 22
+                    });
                 });
-                suckedObstacles = [];
+                suckedItems = [];
             }
         };
 
@@ -81,86 +91,136 @@
         window.addEventListener('touchmove', (e) => { if(player.isPressing) e.preventDefault(); moveAction(e); }, {passive:false});
         window.addEventListener('touchend', endAction);
 
+        // 创建爆炸粒子
+        function createExplosion(x, y, color) {
+            for(let i=0; i<10; i++) {
+                particles.push({
+                    x: x, y: y,
+                    vx: (Math.random() - 0.5) * 8,
+                    vy: (Math.random() - 0.5) * 8,
+                    r: Math.random() * 3 + 2,
+                    alpha: 1,
+                    color: color
+                });
+            }
+        }
+
+        // 核心渲染循环
         function update() {
-            ctx.fillStyle = '#1a1a1a'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#0d0d1f'; ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            // 1. 渲染吸附范围圈
+            // 1. 动态计算体积：吸得越多，体积越大
+            player.r = player.baseR + suckedItems.length * 2.5;
+
+            // 2. 渲染吸附怨气圈
             if (player.isPressing) {
-                ctx.beginPath(); ctx.arc(player.x, player.y, 80, 0, Math.PI*2);
-                ctx.fillStyle = 'rgba(0, 150, 255, 0.1)'; ctx.fill();
-                ctx.strokeStyle = 'rgba(0, 150, 255, 0.4)'; ctx.stroke();
+                ctx.beginPath(); ctx.arc(player.x, player.y, player.maxSuckR, 0, Math.PI*2);
+                ctx.fillStyle = 'rgba(0, 168, 255, 0.05)'; ctx.fill();
+                ctx.strokeStyle = 'rgba(0, 168, 255, 0.3)'; ctx.lineWidth = 2; ctx.stroke();
             }
 
-            // 2. 绘制玩家
+            // 3. 渲染主角牛马（核心小黄球）
             ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, Math.PI*2);
-            ctx.fillStyle = '#2ed573'; ctx.fill();
+            ctx.fillStyle = '#ffd32a'; ctx.fill();
+            ctx.strokeStyle = '#00a8ff'; ctx.lineWidth = 3; ctx.stroke();
 
-            // 3. 随机生成下落红方块
+            // 4. 随机生成坠落物（包含大饼和普通KPI）
             if (Math.random() < 0.04) {
-                obstacles.push({ x: Math.random() * (canvas.width - 40), y: -30, w: 40, h: 25, speed: Math.random() * 2 + 2 });
+                let isBoss = Math.random() < 0.25; // 25%概率刷大饼
+                let txt = isBoss ? bossText : textPool[Math.floor(Math.random() * textPool.length)];
+                ctx.font = isBoss ? "bold 13px sans-serif" : "12px sans-serif";
+                let textWidth = ctx.measureText(txt).width + 16;
+                obstacles.push({
+                    x: Math.random() * (canvas.width - textWidth),
+                    y: -40,
+                    text: txt,
+                    w: textWidth,
+                    h: isBoss ? 32 : 24,
+                    isBoss: isBoss,
+                    speed: isBoss ? 2 : 3.5
+                });
             }
 
-            // 4. 处理正常下落的红方块
+            // 5. 更新及渲染坠落物
             for (let i = obstacles.length - 1; i >= 0; i--) {
                 let obs = obstacles[i];
                 obs.y += obs.speed;
-                
-                ctx.fillStyle = '#ff4757'; ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
 
-                // 检查是否进入吸附圈
-                if (player.isPressing) {
+                // 绘制背景框
+                ctx.fillStyle = obs.isBoss ? '#ff9f43' : '#ff4757';
+                ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
+                // 绘制文字
+                ctx.fillStyle = '#fff';
+                ctx.font = obs.isBoss ? "bold 12px sans-serif" : "11px sans-serif";
+                ctx.fillText(obs.text, obs.x + 8, obs.y + (obs.h/2) + 4);
+
+                // 吸附逻辑判定（只有普通KPI能被吸附，大饼BOSS太重了只能用子弹打）
+                if (player.isPressing && !obs.isBoss) {
                     let cx = obs.x + obs.w/2; let cy = obs.y + obs.h/2;
-                    if (Math.hypot(player.x - cx, player.y - cy) < 80) {
-                        // 被吸住，转移阵营
+                    if (Math.hypot(player.x - cx, player.y - cy) < player.maxSuckR) {
                         obstacles.splice(i, 1);
-                        // 记录相对玩家的偏置位置，形成尾随效果
-                        obs.offsetX = (Math.random() - 0.5) * 30;
+                        // 赋予随尾偏置
+                        obs.offsetX = (Math.random() - 0.5) * 40;
                         obs.offsetY = player.r + Math.random() * 30;
-                        suckedObstacles.push(obs);
+                        suckedItems.push(obs);
                         continue;
                     }
                 }
 
-                // 触底回收
-                if (obs.y > canvas.height) { obstacles.splice(i, 1); }
+                // 触底或撞击死亡判定
+                if (Math.hypot(player.x - (obs.x + obs.w/2), player.y - (obs.y + obs.h/2)) < player.r + 10) {
+                    // 撞到大饼或KPI，底气受挫（这里暂时做个特效，清空子弹作为惩罚）
+                    createExplosion(player.x, player.y, '#ff4757');
+                    suckedItems = [];
+                    obstacles.splice(i, 1);
+                    score = Math.max(0, score - 50);
+                    scoreText.textContent = score;
+                    continue;
+                }
+
+                if (obs.y > canvas.height) obstacles.splice(i, 1);
             }
 
-            // 5. 处理吸附在身边的方块（绘制在玩家屁股后面）
-            suckedObstacles.forEach(obs => {
-                obs.x = player.x - obs.w/2 + obs.offsetX;
-                obs.y = player.y + obs.offsetY;
-                ctx.fillStyle = '#0096ff'; ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
+            // 6. 渲染被吸附在身边的方块（拖尾）
+            suckedItems.forEach((item, index) => {
+                item.x = player.x - item.w/2 + item.offsetX;
+                item.y = player.y + item.offsetY + (index * 5); // 堆叠感
+                ctx.fillStyle = 'rgba(0, 168, 255, 0.8)';
+                ctx.fillRect(item.x, item.y, item.w, item.h);
+                ctx.fillStyle = '#fff';
+                ctx.font = "10px sans-serif";
+                ctx.fillText(item.text, item.x + 6, item.y + 15);
             });
 
-            // 6. 处理发射出去的方块（子弹）
-            for (let b = bulletObstacles.length - 1; b >= 0; b--) {
-                let bObs = bulletObstacles[b];
-                bObs.x += bObs.vx; bObs.y += bObs.vy;
+            // 7. 处理发射出去的“驳回！”子弹
+            for (let b = bullets.length - 1; b >= 0; b--) {
+                let bullet = bullets[b];
+                bullet.x += bullet.vx; bullet.y += bullet.vy;
 
-                ctx.fillStyle = '#ffd32a'; ctx.fillRect(bObs.x, bObs.y, bObs.w, bObs.h);
+                // 绘制金色“驳回！”
+                ctx.fillStyle = '#ffd32a';
+                ctx.fillRect(bullet.x, bullet.y, bullet.w, bullet.h);
+                ctx.fillStyle = '#000'; ctx.font = "bold 11px sans-serif";
+                ctx.fillText(bullet.text, bullet.x + 10, bullet.y + 15);
 
-                // 检查是否撞击了其他下落的红方块（碰撞对撞）
+                // 子弹与坠落物的碰撞检测
                 for (let i = obstacles.length - 1; i >= 0; i--) {
                     let target = obstacles[i];
-                    if (bObs.x < target.x + target.w && bObs.x + bObs.w > target.x && bObs.y < target.y + target.h && bObs.y + bObs.h > target.y) {
-                        // 发生对撞消失！
+                    if (bullet.x < target.x + target.w && bullet.x + bullet.w > target.x && bullet.y < target.y + target.h && bullet.y + bullet.h > target.y) {
+                        createExplosion(target.x + target.w/2, target.y + target.h/2, target.isBoss ? '#ff9f43' : '#ff4757');
                         obstacles.splice(i, 1);
-                        bulletObstacles.splice(b, 1);
-                        score += 10; scoreText.textContent = score;
+                        bullets.splice(b, 1);
+                        score += target.isBoss ? 100 : 20;
+                        scoreText.textContent = score;
                         break;
                     }
                 }
 
-                // 出界回收
-                if (bObs.y < -50 || bObs.x < -50 || bObs.x > canvas.width + 50) {
-                    bulletObstacles.splice(b, 1);
+                if (bullet.y < -50 || bullet.x < -50 || bullet.x > canvas.width + 50) {
+                    if(bullets[b]) bullets.splice(b, 1);
                 }
             }
 
-            holdText.textContent = suckedObstacles.length;
-            requestAnimationFrame(update);
-        }
-        update();
-    </script>
-</body>
-</html>
+            // 8. 渲染爆炸粒子
+            for(let p = particles.length - 1; p >= 0; p--) {
+                let pt = particles[p];
